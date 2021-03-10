@@ -19,7 +19,6 @@ You should have something like this : `MyProject/Plugins/UDKImportPlugin`
 2. Then right click on your .uproject file and "Generate Visual Studio Project" to force generation of valid Visual Studio project with the plugin inside.
 3. Start your project. While starting the editor should build the plugin.
 4. Activate the plugin via the Plugin Manager and restart the editor
-5. To access to the import tool go to : 
 
 How to use
 ----------
