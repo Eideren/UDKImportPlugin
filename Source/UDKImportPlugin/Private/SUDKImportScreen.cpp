@@ -1,5 +1,5 @@
-#include "UDKImportPluginPrivatePCH.h"
 #include "SUDKImportScreen.h"
+#include "UDKImportPluginPrivatePCH.h"
 #include "T3DLevelParser.h"
 
 #define LOCTEXT_NAMESPACE "UDKImportScreen"
@@ -53,7 +53,7 @@ FText SUDKImportScreen::ExportType_GetSelectedText() const
 }
 
 SUDKImportScreen::SUDKImportScreen()
-	: ExportMode(EUDKImportMode::Map)
+	: ExportMode(EUDKImportMode::Material)
 {
 
 }
@@ -78,7 +78,7 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("UDKPathLabel", "Path to UDK"))
+				.Text(LOCTEXT("ExportType", "Type"))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -86,7 +86,7 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("ExportType", "Exportation mode"))
+				.Text(LOCTEXT("TmpDirLabel", "Import path"))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -94,15 +94,7 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("Reference", "Reference"))
-			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			.Padding(2.0f)
-			.VAlign(VAlign_Center)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("TmpDirLabel", "Temporary Directory"))
+				.Text(LOCTEXT("DestDirLabel", "Destination path"))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -113,14 +105,6 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 		.FillWidth(2.0f)
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			.Padding(2.0f)
-			[
-				SAssignNew(SUDKPath, SEditableTextBox)
-				.Text(FText::FromString(TEXT("C:/UDK/UDK-2014-02")))
-				.ToolTipText(LOCTEXT("UDKPath", "Path to the UDK directory(ex: \"C:/UDK/UDK-2014-02\")"))
-			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			.Padding(2.0f)
@@ -138,17 +122,17 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 			.FillHeight(1.0f)
 			.Padding(2.0f)
 			[
-				SAssignNew(SLevel, SEditableTextBox)
-				.Text(FText::FromString(TEXT("MyPackage.MyRessouce")))
-				.ToolTipText(LOCTEXT("MyPackage.MyRessouce", "Reference to the ressource or package (eg: MyLevel or MyPackage.MyRessource)"))
+				SAssignNew(SSourcePath, SEditableTextBox)
+				.Text(FText::FromString(TEXT("C:/Materials")))
+				.ToolTipText(LOCTEXT("ExportTmpFolder", "An existing directory containing assets you want to import, for levels you must name that file PersistentLevel.T3D"))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			.Padding(2.0f)
 			[
-				SAssignNew(STmpPath, SEditableTextBox)
-				.Text(FText::FromString(TEXT("C:/UDK/TemporaryFolder")))
-				.ToolTipText(LOCTEXT("ExportTmpFolder", "An existing temporary folder to use for the UDK exportation"))
+				SAssignNew(SDestPath, SEditableTextBox)
+				.Text(FText::FromString(TEXT("Original/")))
+				.ToolTipText(LOCTEXT("DestFolder", "A directory within this unreal project to find references and import those assets into"))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -164,45 +148,51 @@ void SUDKImportScreen::Construct(const FArguments& Args)
 	];
 
 	ExportTypeOptionsSource.Reset(5);
-	ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::Map)));
-	ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::StaticMesh)));
+	//ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::Map)));
+	//ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::StaticMesh)));
 	ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::Material)));
-	ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::MaterialInstanceConstant)));
+	//ExportTypeOptionsSource.Add(MakeShareable(new EUDKImportMode::Type(EUDKImportMode::MaterialInstanceConstant)));/*Instance constants can be imported through 'Material'*/
 }
 
 FReply SUDKImportScreen::OnRun()
 {
-	const FString UdkPath = SUDKPath.Get()->GetText().ToString();
-	const FString TmpPath = STmpPath.Get()->GetText().ToString();
-	const FString Ressource = SLevel.Get()->GetText().ToString();
-
+	FString SourcePath = SSourcePath.Get()->GetText().ToString();
+	SourcePath = SourcePath.Replace(_TEXT("\\"), _TEXT("/"));
+	SourcePath.RemoveFromEnd("/");
+	FString DestPath = SDestPath.Get()->GetText().ToString();
+	DestPath = DestPath.Replace(_TEXT("\\"), _TEXT("/"));
+	DestPath.RemoveFromEnd("/");
+	DestPath.RemoveFromStart("/");
+	
 	switch (ExportMode)
 	{
 	case EUDKImportMode::Map:
 	{
-		T3DLevelParser Parser(UdkPath, TmpPath);
-		Parser.ImportLevel(Ressource);
+		T3DLevelParser Parser(SourcePath, DestPath);
+		Parser.ImportLevel();
 		break;
 	}
 	case EUDKImportMode::StaticMesh:
 	{
-		T3DLevelParser Parser(UdkPath, TmpPath);
-		Parser.ImportStaticMesh(Ressource);
+		T3DLevelParser Parser(SourcePath, DestPath);
+		Parser.ImportStaticMesh();
 		break;
 	}
 	case EUDKImportMode::Material:
 	{
-		T3DLevelParser Parser(UdkPath, TmpPath);
-		Parser.ImportMaterial(Ressource);
+		T3DLevelParser Parser(SourcePath, DestPath);
+		Parser.ImportMaterial();
 		break;
 	}
 	case EUDKImportMode::MaterialInstanceConstant:
 	{
-		T3DLevelParser Parser(UdkPath, TmpPath);
-		Parser.ImportMaterialInstanceConstant(Ressource);
+		T3DLevelParser Parser(SourcePath, DestPath);
+		Parser.ImportMaterialInstanceConstant();
 		break;
 	}
 	}
-
+	
 	return FReply::Handled();
 }
+
+#undef LOCTEXT_NAMESPACE

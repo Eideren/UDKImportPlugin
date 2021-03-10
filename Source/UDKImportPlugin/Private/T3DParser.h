@@ -1,34 +1,67 @@
 #pragma once
 
-#define LOCTEXT_NAMESPACE "UDKImportPlugin"
+#include "CoreMinimal.h"
+#include "UObject/Object.h"
+#include "Engine/EngineTypes.h"
+//#define LOCTEXT_NAMESPACE "UDKImportPlugin"
 
 DECLARE_LOG_CATEGORY_EXTERN(UDKImportPluginLog, Log, All);
 DECLARE_DELEGATE_OneParam(UObjectDelegate, UObject*);
+
+static void OpenMsgDialog(FString f)
+{
+	FMessageDialog::Open(EAppMsgType::Type::Ok, FText::FromString(f));
+}
 
 class T3DParser
 {
 public:
 	struct FRequirement
 	{
-		FString Type, Package, Name, OriginalUrl, Url;
+		FString Type;
+
+		FString RelDirectory;
+
+		FString Name;
+
+		FString OriginalUrl;
+		
+		FString Url;
+
+		FRequirement()
+		{}
+
+		bool operator==(const FRequirement& second)
+		{
+			return this->Type == second.Type 
+			&& this->RelDirectory == second.RelDirectory
+			&& this->Name == second.Name
+			&& this->OriginalUrl == second.OriginalUrl
+			&& this->Url == second.Url;
+		}
+		/*friend  uint32 GetTypeHash(const FRequirement& Other)
+		{
+			return (uint32)0;
+		}*/
+
+		FORCEINLINE friend uint32 GetTypeHash(const T3DParser::FRequirement& R)
+		{
+			return FCrc::Strihash_DEPRECATED(*(R.Url));
+		}
 	};
 protected:
 	static float UnrRotToDeg;
 	static float IntensityMultiplier;
 
-	T3DParser(const FString &UdkPath, const FString &TmpPath);
+	T3DParser(const FString &SourcePath, const FString &DestPath);
 
 	int32 StatusNumerator, StatusDenominator;
 
-	/// UDK
-	FString UdkPath, TmpPath;
-	int32 RunUDK(const FString &CommandLine);
-	int32 RunUDK(const FString &CommandLine, FString &output);
+	FString SourcePath, DestPath;
 
 	/// Ressources requirements
 	TMap<FRequirement, TArray<UObjectDelegate> > Requirements;
 	TMap<FRequirement, UObject*> FixedRequirements;
-	bool ConvertOBJToFBX(const FString &ObjFileName, const FString &FBXFilename);
 	void AddRequirement(const FString &UDKRequiredObjectName, UObjectDelegate Action);
 	void FixRequirement(const FString &UDKRequiredObjectName, UObject * Object);
 	bool FindRequirement(const FString &UDKRequiredObjectName, UObject * &Object);
@@ -40,7 +73,7 @@ protected:
 	/// Line parsing
 	int32 LineIndex, ParserLevel;
 	TArray<FString> Lines;
-	FString Line, Package;
+	FString Line, RelDirectory;
 	void ResetParser(const FString &Content);
 	bool NextLine();
 	bool IgnoreSubs();
@@ -61,15 +94,27 @@ protected:
 	bool GetProperty(const FString &Key, FString &Value);
 	bool ParseUDKRotation(const FString &InSourceString, FRotator &Rotator);
 	bool ParseFVector(const TCHAR* Stream, FVector& Value);
-	void ParseRessourceUrl(const FString &Url, FString &Package, FString &Name);
-	bool ParseRessourceUrl(const FString &Url, FString &Type, FString &Package, FString &Name);
 	bool ParseRessourceUrl(const FString &Url, FRequirement &Requirement);
-};
 
-FORCEINLINE uint32 GetTypeHash(const T3DParser::FRequirement& R)
-{
-	return FCrc::Strihash_DEPRECATED(*(R.Url));
-}
+	FString GetPathToT3D(FString relDirectory, FString Name)
+	{
+		return SourcePath / relDirectory.Replace(_T("."), _T("/")) / Name + ".T3D";
+	}
+
+	FString GetPathToUAsset(FString relDirectory, FString Name)
+	{
+		return GetPathToDirectory(relDirectory) / Name + "." + Name;
+	}
+
+	FString GetPathToDirectory(FString relDirectory)
+	{
+		return "/Game" / DestPath / relDirectory.Replace( _T("."), _T("/") );
+	}
+
+private:
+	void ParseRessourceUrl(const FString &Url, FString &relDirectory, FString &Name);
+	bool ParseRessourceUrl(const FString &Url, FString &Type, FString &relDirectory, FString &Name);
+};
 
 FORCEINLINE bool operator==(const T3DParser::FRequirement& A, const T3DParser::FRequirement& B)
 {
@@ -79,9 +124,9 @@ FORCEINLINE bool operator==(const T3DParser::FRequirement& A, const T3DParser::F
 FORCEINLINE bool T3DParser::ParseRessourceUrl(const FString &Url, FRequirement &Requirement)
 {
 	Requirement.OriginalUrl = Url;
-	if (ParseRessourceUrl(Url, Requirement.Type, Requirement.Package, Requirement.Name))
+	if (ParseRessourceUrl(Url, Requirement.Type, Requirement.RelDirectory, Requirement.Name))
 	{
-		Requirement.Url = FString::Printf(TEXT("%s'%s.%s'"), *Requirement.Type, *Requirement.Package, *Requirement.Name);
+		Requirement.Url = FString::Printf(TEXT("%s'%s.%s'"), *Requirement.Type, *Requirement.RelDirectory, *Requirement.Name);
 		return true;
 	}
 	return false;

@@ -1,12 +1,14 @@
+#include "T3DLevelParser.h"
 #include "UDKImportPluginPrivatePCH.h"
 #include "Editor/UnrealEd/Public/BSPOps.h"
 #include "Runtime/Engine/Public/ComponentReregisterContext.h"
 #include "Runtime/Engine/Classes/Sound/SoundNode.h"
-#include "T3DLevelParser.h"
 #include "T3DMaterialParser.h"
 #include "T3DMaterialInstanceConstantParser.h"
 
-T3DLevelParser::T3DLevelParser(const FString &UdkPath, const FString &TmpPath) : T3DParser(UdkPath, TmpPath)
+#define LOCTEXT_NAMESPACE "UDKImportPlugin"
+
+T3DLevelParser::T3DLevelParser(const FString &SourcePath, const FString &DestPath) : T3DParser(SourcePath, DestPath)
 {
 	this->World = NULL;
 }
@@ -24,95 +26,57 @@ T * T3DLevelParser::SpawnActor()
 	return World->SpawnActor<T>();
 }
 
-void T3DLevelParser::ImportLevel(const FString &Level)
+void T3DLevelParser::ImportLevel()
 {
 	GWarn->BeginSlowTask(LOCTEXT("StatusBeginLevel", "Importing requested level"), true, false);
 	StatusNumerator = 0;
 	StatusDenominator = 12;
-	
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportUDKLevelT3D", "Exporting UDK Level informations"));
-	{
-		const FString CommandLine = FString::Printf(TEXT("batchexport %s Level T3D %s"), *Level, *TmpPath);
-		if (RunUDK(CommandLine) != 0)
-		{
-			GWarn->EndSlowTask();
-			return;
-		}
-	}
 
 	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("LoadUDKLevelT3D", "Loading UDK Level informations"));
 	{
 		FString UdkLevelT3D;
-		if (!FFileHelper::LoadFileToString(UdkLevelT3D, *(TmpPath / TEXT("PersistentLevel.T3D"))))
+		if (!FFileHelper::LoadFileToString(UdkLevelT3D, *(SourcePath / TEXT("PersistentLevel.T3D"))))
 		{
 			GWarn->EndSlowTask();
 			return;
 		}
 
 		ResetParser(UdkLevelT3D);
-		Package = Level;
+		RelDirectory = _T("");
 	}
 
 	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ParsingUDKLevelT3D", "Parsing UDK Level informations"));
-	ImportLevel();
+	ImportLevelInternal();
 
 	ResolveRequirements();
 	GWarn->EndSlowTask();
 }
 
-void T3DLevelParser::ImportStaticMesh(const FString &StaticMesh)
+void T3DLevelParser::ImportStaticMesh()
 {
-	ImportRessource(StaticMesh, EExportType::StaticMesh);
+	ImportRessource(EExportType::StaticMesh);
 }
 
-void T3DLevelParser::ImportMaterial(const FString &Material)
+void T3DLevelParser::ImportMaterial()
 {
-	ImportRessource(Material, EExportType::Material);
+	ImportRessource(EExportType::Material);
 }
 
-void T3DLevelParser::ImportMaterialInstanceConstant(const FString &MaterialInstanceConstant)
+void T3DLevelParser::ImportMaterialInstanceConstant()
 {
-	ImportRessource(MaterialInstanceConstant, EExportType::MaterialInstanceConstant);
+	ImportRessource(EExportType::MaterialInstanceConstant);
 }
 
-void T3DLevelParser::ImportRessource(const FString &Ressource, EExportType::Type Type)
+void T3DLevelParser::ImportRessource(EExportType::Type Type)
 {
 	StatusNumerator = 0;
-	StatusDenominator = 9;
+	StatusDenominator = 8;
 
-	FString Name;
-	ParseRessourceUrl(Ressource, Package, Name);
-	if (Name.Len() > 0)
-	{
-		GWarn->BeginSlowTask(LOCTEXT("StatusBeginMaterialRessouce", "Importing requested ressource"), true, false);
-		AddRequirement(FString::Printf(TEXT("%s'%s.%s'"), *RessourceTypeFor(Type), *Package, *Name), UObjectDelegate());
-	}
-	else
-	{
-		GWarn->BeginSlowTask(LOCTEXT("StatusBeginMaterialRessouces", "Importing requested ressource package"), true, false);
-		ExportPackageToRequirements(Package, Type);
-	}
+	GWarn->BeginSlowTask(LOCTEXT("StatusBeginMaterialRessouces", "Scanning files"), true, false);
+	ExportPackageToRequirements(Type);
 
 	ResolveRequirements();
 	GWarn->EndSlowTask();
-}
-
-FString T3DLevelParser::ExportFolderFor(EExportType::Type Type)
-{
-	FString Directory;
-	switch (Type)
-	{
-	case EExportType::Material: Directory = TEXT("ExportedMaterials"); break;
-	case EExportType::StaticMesh: Directory = TEXT("ExportedMeshes"); break;
-	case EExportType::MaterialInstanceConstant: Directory = TEXT("ExportedMaterialInstances"); break;
-	case EExportType::Texture2D: Directory = TEXT("ExportedTextures"); break;
-	case EExportType::Texture2DInfo: Directory = TEXT("ExportedTexturesT3D"); break;
-	default: Directory = TEXT("ExportedUnknowns"); break;
-	}
-
-	Directory = TmpPath / Directory;
-	IFileManager::Get().MakeDirectory(*Directory, true);
-	return Directory;
 }
 
 FString T3DLevelParser::RessourceTypeFor(EExportType::Type Type)
@@ -127,111 +91,88 @@ FString T3DLevelParser::RessourceTypeFor(EExportType::Type Type)
 	}
 }
 
-void T3DLevelParser::ExportPackageToRequirements(const FString &Package, EExportType::Type Type)
+void T3DLevelParser::ExportPackageToRequirements(EExportType::Type Type)
 {
-	FString ExportFolder;
-	if (ExportPackage(Package, Type, ExportFolder))
+	FString RessourceType = RessourceTypeFor(Type);
+
+	TArray<FString> FileNames;
+	IFileManager::Get().FindFilesRecursive(FileNames, *SourcePath, _T("*.T3D"), true, false);
+	for (int32 NameIdx = 0; NameIdx < FileNames.Num(); NameIdx++)
 	{
-		FString RessourceType = RessourceTypeFor(Type);
-
-		TArray<FString> FileNames;
-		IFileManager::Get().FindFiles(FileNames, *(ExportFolder / TEXT("*")), true, false);
-		for (int32 NameIdx = 0; NameIdx < FileNames.Num(); NameIdx++)
-		{
-			const FString & Name = FileNames[NameIdx];
-			if (Name.MatchesWildcard(TEXT("*.???")))
-			{
-				AddRequirement(FString::Printf(TEXT("%s'%s.%s'"), *RessourceType, *Package, *Name.LeftChop(4)), UObjectDelegate());
-			}
-		}
+		FString relPath = FileNames[NameIdx];
+		relPath.RemoveFromEnd(".T3D", ESearchCase::IgnoreCase);
+		relPath.RemoveFromStart((SourcePath + "/"), ESearchCase::IgnoreCase);
+		relPath = relPath.Replace(_T("/"), _T("."));
+		AddRequirement(FString::Printf(TEXT("%s'%s'"), *RessourceType, *relPath), UObjectDelegate());
 	}
-}
-
-bool T3DLevelParser::ExportPackage(const FString &Package, EExportType::Type Type, FString & ExportFolder)
-{
-	ExportFolder = ExportFolderFor(Type) / Package;
-
-	if (!IFileManager::Get().DirectoryExists(*ExportFolder))
-	{
-		FString Command;
-		switch (Type)
-		{
-		case EExportType::Material: Command = TEXT("Material T3D"); break;
-		case EExportType::StaticMesh: Command = TEXT("StaticMesh OBJ"); break;
-		case EExportType::MaterialInstanceConstant: Command = TEXT("MaterialInstanceConstant T3D"); break;
-		case EExportType::Texture2D: Command = TEXT("Texture TGA"); break;
-		case EExportType::Texture2DInfo: Command = TEXT("Texture T3D"); break;
-		default: return false;
-		}
-
-		return RunUDK(FString::Printf(TEXT("batchexport %s %s %s"), *Package, *Command, *ExportFolder)) == 0;
-	}
-
-	return true;
 }
 
 void T3DLevelParser::ResolveRequirements()
 {
-	FAssetToolsModule& AssetToolsModule = FModuleManager::Get().LoadModuleChecked<FAssetToolsModule>("AssetTools");
-	
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportStaticMeshRequirements", "Exporting StaticMesh referenced assets"));
-	ExportStaticMeshRequirements();
-
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportMaterialInstanceConstantAssets", "Exporting MaterialInstanceConstant assets"));
-	ExportMaterialInstanceConstantAssets();
-
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportMaterialAssets", "Exporting ExportMaterial assets"));
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportMaterialAssets", "Parsing materials"));
 	ExportMaterialAssets();
 
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportTextureAssets", "Exporting Texture assets"));
-	ExportTextureAssets();
-
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportStaticMeshAssets", "Exporting StaticMesh assets"));
-	ExportStaticMeshAssets();
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ExportMaterialInstanceConstantAssets", "Parsing material instances"));
+	ExportMaterialInstanceConstantAssets();
 	
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ImportAssets", "Importing Assets"));
-	TArray<FString> AssetsPath;
-	AssetsPath.Add(TmpPath / TEXT("UDK"));
-	AssetToolsModule.Get().ImportAssets(AssetsPath, TEXT("/Game/"));
-	
-	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks", "Updating actors assets"));
-	UTexture2D * DefaultTexture2D = FindObject<UTexture2D>(NULL, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks", "Fixing reference with existing assets"));
+	//UTexture2D * DefaultTexture2D = LoadObject<UTexture2D>(NULL, TEXT("/Engine/EngineResources/DefaultTexture.DefaultTexture"));
 	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
 	{
 		const FRequirement &Requirement = Iter.Key();
 
+		FString ObjectPath = GetPathToUAsset(Requirement.RelDirectory, Requirement.Name);
+		UObject * asset = NULL;
+
 		if (Requirement.Type == TEXT("StaticMesh"))
 		{
-			FString ObjectPath = FString::Printf(TEXT("/Game/UDK/%s/Meshes/%s.%s"), *Requirement.Package, *Requirement.Name, *Requirement.Name);
-			UObject * Object = FindObject<UStaticMesh>(NULL, *ObjectPath);
-			if (Object)
-			{
-				FixRequirement(Requirement, Object);
-			}
+			asset = LoadObject<UStaticMesh>(NULL, *ObjectPath);
+		}
+		else if (Requirement.Type == TEXT("Material") || Requirement.Type == TEXT("DecalMaterial"))
+		{
+			asset = LoadObject<UMaterial>(NULL, *ObjectPath);
 		}
 		else if (Requirement.Type.StartsWith(TEXT("Texture")))
 		{
-			FString ObjectPath = FString::Printf(TEXT("/Game/UDK/%s/Textures/%s.%s"), *Requirement.Package, *Requirement.Name, *Requirement.Name);
-			UTexture2D * Texture2D = FindObject<UTexture2D>(NULL, *ObjectPath);
-			if (!Texture2D)
+			asset = LoadObject<UTexture>(NULL, *ObjectPath);
+			/*if (!asset)
 			{
-				UE_LOG(UDKImportPluginLog, Warning, TEXT("Missing requirements : %s"), *Requirement.Url);
-				Texture2D = DefaultTexture2D;
-			}
-			FixRequirement(Requirement, Texture2D);
+				FixRequirement(Requirement, DefaultTexture2D); // Using default texture
+			}*/
+		}
+
+		if (asset)
+		{
+			FixRequirement(Requirement, asset);
 		}
 	}
+
+
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks2", "Update existing assets"));
 
 	// make sure that any static meshes, etc using this material will stop using the FMaterialResource of the original 
 	// material, and will use the new FMaterialResource created when we make a new UMaterial in place
 	FGlobalComponentReregisterContext RecreateComponents;
 
-	// Compile Materials
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks3", "Compile materials"));
 	PostEditChangeFor(TEXT("Material"));
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks4", "Compile material instances"));
 	PostEditChangeFor(TEXT("MaterialInstanceConstant"));
+	GWarn->StatusUpdate(++StatusNumerator, StatusDenominator, LOCTEXT("ResolvingLinks5", "Post edit for meshes"));
 	PostEditChangeFor(TEXT("StaticMesh"));
 
 	PrintMissingRequirements();
+	int i = 0;
+	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
+	{
+		const FRequirement& Requirement = Iter.Key();
+
+		FString ObjectPath = GetPathToUAsset(Requirement.RelDirectory, Requirement.Name);
+		LogContent += FString::Printf(TEXT("Failed to find %s '%s'\n"), *Requirement.Type, *ObjectPath);
+		i++;
+	}
+	if (LogContent != TEXT(""))
+		OpenMsgDialog(LogContent);
 }
 
 void T3DLevelParser::PostEditChangeFor(const FString &Type)
@@ -254,186 +195,66 @@ void T3DLevelParser::PostEditChangeFor(const FString &Type)
 	}
 }
 
-void T3DLevelParser::ExportStaticMeshRequirements()
-{
-	int32 StaticMeshesParamsCount = 0;
-	FString StaticMeshesParams = TEXT("run UDKPluginExport.ExportStaticMeshMaterials");
-	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
-	{
-		const FRequirement &Requirement = Iter.Key();
-
-		if (Requirement.Type == TEXT("StaticMesh"))
-		{
-			StaticMeshesParams += TEXT(" ") + Requirement.OriginalUrl;
-			++StaticMeshesParamsCount;
-			if (StaticMeshesParamsCount >= 200)
-			{
-				ExportStaticMeshRequirements(StaticMeshesParams);
-				StaticMeshesParamsCount = 0;
-				StaticMeshesParams = TEXT("run UDKPluginExport.ExportStaticMeshMaterials");
-			}
-		}
-	}
-
-	if (StaticMeshesParamsCount > 0)
-	{
-		ExportStaticMeshRequirements(StaticMeshesParams);
-	}
-}
-
-void T3DLevelParser::ExportStaticMeshRequirements(const FString &StaticMeshesParams)
-{
-	FString ExportStaticMeshMaterialsOutput;
-	if (RunUDK(StaticMeshesParams, ExportStaticMeshMaterialsOutput) == 0)
-	{
-		ResetParser(ExportStaticMeshMaterialsOutput);
-		while (NextLine())
-		{
-			if (Line.StartsWith(TEXT("ScriptLog: ")))
-			{
-				int32 StaticMeshUrlEndIndex = Line.Find(TEXT(" "), ESearchCase::CaseSensitive, ESearchDir::FromStart, 11);
-				int32 MaterialIdxEndIndex = Line.Find(TEXT(" "), ESearchCase::CaseSensitive, ESearchDir::FromStart, StaticMeshUrlEndIndex + 1);
-				if (StaticMeshUrlEndIndex != -1 && MaterialIdxEndIndex != -1)
-				{
-					FString StaticMeshUrl = Line.Mid(11, StaticMeshUrlEndIndex - 11);
-					int32 MaterialIdx = FCString::Atoi(*Line.Mid(StaticMeshUrlEndIndex + 1, MaterialIdxEndIndex - StaticMeshUrlEndIndex - 1));
-					FString MaterialUrl = Line.Mid(MaterialIdxEndIndex + 1);
-					AddRequirement(MaterialUrl, UObjectDelegate::CreateRaw(this, &T3DLevelParser::SetStaticMeshMaterial, StaticMeshUrl, MaterialIdx));
-				}
-			}
-		}
-	}
-}
-
 void T3DLevelParser::ExportMaterialInstanceConstantAssets()
 {
 	bool bRequiresAnotherLoop = false;
 
-	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
+	do
 	{
-		const FRequirement &Requirement = Iter.Key();
-
-		if (Requirement.Type == TEXT("MaterialInstanceConstant"))
+		bRequiresAnotherLoop = false;
+		for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
 		{
-			FString ExportFolder;
-			FString FileName = Requirement.Name + TEXT(".T3D");
-			ExportPackage(Requirement.Package, EExportType::MaterialInstanceConstant, ExportFolder);
+			const FRequirement &Requirement = Iter.Key();
 
-			FString ObjectPath = FString::Printf(TEXT("/Game/UDK/%s/MaterialInstances/%s.%s"), *Requirement.Package, *Requirement.Name, *Requirement.Name);
-			UMaterialInstanceConstant * MaterialInstanceConstant = LoadObject<UMaterialInstanceConstant>(NULL, *ObjectPath, NULL, LOAD_NoWarn | LOAD_Quiet);
-			if (!MaterialInstanceConstant)
+			if (Requirement.Type == TEXT("MaterialInstanceConstant"))
 			{
-				T3DMaterialInstanceConstantParser MaterialInstanceConstantParser(this, Requirement.Package);
-				MaterialInstanceConstant = MaterialInstanceConstantParser.ImportT3DFile(ExportFolder / FileName);
-			}
+				FString ObjectPath = GetPathToUAsset(*Requirement.RelDirectory, *Requirement.Name);
+				UMaterialInstanceConstant * MaterialInstanceConstant = NULL; //LoadObject<UMaterialInstanceConstant>(NULL, *ObjectPath, NULL, LOAD_NoWarn | LOAD_Quiet);
+				if (!MaterialInstanceConstant)
+				{
+					T3DMaterialInstanceConstantParser MaterialInstanceConstantParser(this, Requirement.RelDirectory);
+					MaterialInstanceConstant = MaterialInstanceConstantParser.ImportT3DFile(GetPathToT3D(Requirement.RelDirectory, Requirement.Name), Requirement);
+				}
 
-			if (MaterialInstanceConstant)
-			{
-				bRequiresAnotherLoop = true;
-				FixRequirement(Requirement, MaterialInstanceConstant);
-			}
-			else
-			{
-				UE_LOG(UDKImportPluginLog, Warning, TEXT("Unable to import : %s"), *Requirement.Url);
+				if (MaterialInstanceConstant)
+				{
+					bRequiresAnotherLoop = true;
+					FixRequirement(Requirement, MaterialInstanceConstant);
+				}
+				else
+				{
+					UE_LOG(UDKImportPluginLog, Warning, TEXT("Unable to import : %s"), *Requirement.Url);
+				}
 			}
 		}
-	}
-
-	if (bRequiresAnotherLoop)
-	{
-		ExportMaterialInstanceConstantAssets();
-	}
+	} while (bRequiresAnotherLoop);
 }
 
 void T3DLevelParser::ExportMaterialAssets()
 {
-	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
+	for (auto Iter = Requirements.CreateIterator(); Iter; ++Iter)
 	{
-		const FRequirement &Requirement = Iter.Key();
+		FRequirement &Requirement = Iter.Key();
 
 		if (Requirement.Type == TEXT("Material"))
 		{
-			FString ExportFolder;
-			FString FileName = Requirement.Name + TEXT(".T3D");
-			ExportPackage(Requirement.Package, EExportType::Material, ExportFolder);
-				
-			FString ObjectPath = FString::Printf(TEXT("/Game/UDK/%s/Materials/%s.%s"), *Requirement.Package, *Requirement.Name, *Requirement.Name);
-			UMaterial * Material = LoadObject<UMaterial>(NULL, *ObjectPath, NULL, LOAD_NoWarn | LOAD_Quiet);
+			FString ObjectPath = GetPathToUAsset(*Requirement.RelDirectory, *Requirement.Name);
+			UMaterial * Material = NULL;//LoadObject<UMaterial>(NULL, *ObjectPath, NULL, LOAD_NoWarn | LOAD_Quiet);
 			if (!Material)
 			{
-				T3DMaterialParser MaterialParser(this, Requirement.Package);
-				Material = MaterialParser.ImportMaterialT3DFile(ExportFolder / FileName);
+				T3DMaterialParser MaterialParser(this, Requirement.RelDirectory);
+				Material = MaterialParser.ImportMaterialT3DFile(GetPathToT3D(Requirement.RelDirectory, Requirement.Name), Requirement);
 			}
 
 			if (Material)
 			{
 				FixRequirement(Requirement, Material);
 			}
-			else
-			{
-				UE_LOG(UDKImportPluginLog, Warning, TEXT("Unable to import : %s"), *Requirement.Url);
-			}
 		}
 	}
 }
 
-void T3DLevelParser::ExportTextureAssets()
-{
-	IFileManager & FileManager = IFileManager::Get();
-
-	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
-	{
-		const FRequirement &Requirement = Iter.Key();
-
-		if (Requirement.Type.StartsWith(TEXT("Texture")))
-		{
-			FString ExportFolder;
-			FString ImportFolder = TmpPath / TEXT("UDK") / Requirement.Package / TEXT("Textures");
-			FString FileName = Requirement.Name + TEXT(".TGA");
-			ExportPackage(Requirement.Package, EExportType::Texture2D, ExportFolder);
-
-			FileManager.MakeDirectory(*ImportFolder, true);
-			if (FileManager.FileSize(*(ExportFolder / FileName)) > 0)
-			{
-				FileManager.Copy(*(ImportFolder / FileName), *(ExportFolder / FileName));
-			}
-		}
-	}
-}
-
-void T3DLevelParser::ExportStaticMeshAssets()
-{
-	FString ExportFolder, ImportFolder, FileNameOBJ, FileNameFBX;
-	IFileManager & FileManager = IFileManager::Get();
-
-	FileManager.MakeDirectory(*(TmpPath / TEXT("ExportedMeshes")), true);
-
-	for (auto Iter = Requirements.CreateConstIterator(); Iter; ++Iter)
-	{
-		const FRequirement &Requirement = Iter.Key();
-
-		if (Requirement.Type == TEXT("StaticMesh"))
-		{
-			FString ExportFolder;
-			FString ImportFolder = TmpPath / TEXT("UDK") / Requirement.Package / TEXT("Meshes");
-			FString FileNameOBJ = Requirement.Name + TEXT(".OBJ");
-			FString FileNameFBX = Requirement.Name + TEXT(".FBX");
-			ExportPackage(Requirement.Package, EExportType::StaticMesh, ExportFolder);
-
-			FileManager.MakeDirectory(*ImportFolder, true);
-			if (FileManager.FileSize(*(ExportFolder / FileNameFBX)) > 0)
-			{
-				FileManager.Copy(*(ImportFolder / FileNameFBX), *(ExportFolder / FileNameFBX));
-			}
-			else if (FileManager.FileSize(*(ExportFolder / FileNameOBJ)) > 0)
-			{
-				ConvertOBJToFBX(ExportFolder / FileNameOBJ, ImportFolder / FileNameFBX);
-			}
-		}
-	}
-}
-
-void T3DLevelParser::ImportLevel()
+void T3DLevelParser::ImportLevelInternal()
 {
 	FString Class;
 
@@ -464,7 +285,8 @@ void T3DLevelParser::ImportBrush()
 	FString Value, Class, Name;
 	ABrush * Brush = SpawnActor<ABrush>();
 	Brush->BrushType = Brush_Add;
-	UModel* Model = new(Brush, NAME_None, RF_Transactional)UModel(FPostConstructInitializeProperties(), Brush, 1);
+	UModel* Model = NewObject<UModel>(Brush, NAME_None, RF_Transactional);
+	Model->Initialize(Brush, 1);
 
 	while (NextLine() && !IsEndObject())
 	{
@@ -498,7 +320,7 @@ void T3DLevelParser::ImportBrush()
 	Model->Modify();
 	Model->BuildBound();
 
-	Brush->BrushComponent->Brush = Brush->Brush;
+	Brush->GetBrushComponent()->Brush = Brush->Brush;
 	Brush->PostEditImport();
 	Brush->PostEditChange();
 }
@@ -665,7 +487,7 @@ void T3DLevelParser::ImportStaticMeshActor()
 	FVector PrePivot;
 	bool bPrePivotFound = false;
 	AStaticMeshActor * StaticMeshActor = SpawnActor<AStaticMeshActor>();
-	
+
 	while (NextLine() && !IsEndObject())
 	{
 		if (IsBeginObject(Class))
@@ -676,7 +498,7 @@ void T3DLevelParser::ImportStaticMeshActor()
 				{
 					if (GetProperty(TEXT("StaticMesh="), Value))
 					{
-						AddRequirement(Value, UObjectDelegate::CreateRaw(this, &T3DLevelParser::SetStaticMesh, StaticMeshActor->StaticMeshComponent.Get()));
+						AddRequirement(Value, UObjectDelegate::CreateRaw(this, &T3DLevelParser::SetStaticMesh, StaticMeshActor->GetStaticMeshComponent()));
 					}
 				}
 			}
@@ -731,11 +553,11 @@ void T3DLevelParser::SetPolygonTexture(UObject * Object, UPolys * Polys, int32 i
 
 void T3DLevelParser::SetStaticMesh(UObject * Object, UStaticMeshComponent * StaticMeshComponent)
 {
-	UProperty* ChangedProperty = FindField<UProperty>(UStaticMeshComponent::StaticClass(), "StaticMesh");
+	FProperty* ChangedProperty = FindFProperty<FProperty>(UStaticMeshComponent::StaticClass(), "StaticMesh");
 	UStaticMesh * StaticMesh = Cast<UStaticMesh>(Object);
 	StaticMeshComponent->PreEditChange(ChangedProperty);
 
-	StaticMeshComponent->StaticMesh = StaticMesh;
+	StaticMeshComponent->SetStaticMesh(StaticMesh);
 
 	FPropertyChangedEvent PropertyChangedEvent(ChangedProperty);
 	StaticMeshComponent->PostEditChangeProperty(PropertyChangedEvent);
@@ -756,13 +578,13 @@ void T3DLevelParser::SetStaticMeshMaterialResolved(UObject * Object, UObject * M
 	UStaticMesh * StaticMesh = Cast<UStaticMesh>(Object);
 
 	check(StaticMesh->RenderData);
-	FMeshSectionInfo Info = StaticMesh->SectionInfoMap.Get(0, MaterialIdx);
+	FMeshSectionInfo Info = StaticMesh->GetSectionInfoMap().Get(0, MaterialIdx);
 
-	if (MaterialIdx >= StaticMesh->Materials.Num())
-		StaticMesh->Materials.SetNum(MaterialIdx + 1);
+	if (MaterialIdx >= StaticMesh->StaticMaterials.Num())
+		StaticMesh->StaticMaterials.SetNum(MaterialIdx + 1);
 	Info.MaterialIndex = MaterialIdx;
-	StaticMesh->SectionInfoMap.Set(0, MaterialIdx, Info);
-	StaticMesh->Materials[MaterialIdx] = Cast<UMaterialInterface>(Material);
+	StaticMesh->GetSectionInfoMap().Set(0, MaterialIdx, Info);
+	StaticMesh->SetMaterial(MaterialIdx, Cast<UMaterialInterface>(Material));
 
 	StaticMesh->Modify();
 	StaticMesh->PostEditChange();
@@ -801,5 +623,10 @@ void T3DLevelParser::SetParent(UObject * Object, UMaterialInstanceConstant * Mat
 void T3DLevelParser::SetTextureParameterValue(UObject * Object, UMaterialInstanceConstant * MaterialInstanceConstant, int32 ParameterIndex)
 {
 	UTexture * Texture = Cast<UTexture>(Object);
+	//auto name = MaterialInstanceConstant->TextureParameterValues[ParameterIndex].ParameterInfo.Name;
 	MaterialInstanceConstant->TextureParameterValues[ParameterIndex].ParameterValue = Texture;
+	//MaterialInstanceConstant->SetTextureParameterValueEditorOnly(MaterialInstanceConstant->TextureParameterValues[ParameterIndex].ParameterInfo, Texture);
+	//SetSwitchParameter(MaterialInstanceConstant, name, true, true);
+	//MaterialInstanceConstant->OverrideTexture(MaterialInstanceConstant->TextureParameterValues[ParameterIndex].ParameterValue, Texture, ERHIFeatureLevel::Type::SM5);
+	//MaterialInstanceConstant->OverrideTextureParameterDefault(MaterialInstanceConstant->TextureParameterValues[ParameterIndex].ParameterInfo, Texture, true, ERHIFeatureLevel::Type.SM5);
 }

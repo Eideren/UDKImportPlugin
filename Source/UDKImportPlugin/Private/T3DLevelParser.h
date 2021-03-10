@@ -10,11 +10,12 @@ class T3DLevelParser : public T3DParser
 	friend class T3DMaterialParser;
 	friend class T3DMaterialInstanceConstantParser;
 public:
-	T3DLevelParser(const FString &UdkPath, const FString &TmpPath);
-	void ImportLevel(const FString &Level);
-	void ImportStaticMesh(const FString &StaticMesh);
-	void ImportMaterial(const FString &Material);
-	void ImportMaterialInstanceConstant(const FString &MaterialInstanceConstant);
+	T3DLevelParser(const FString &SourcePath, const FString &DestPath);
+	void ImportLevel();
+	void ImportStaticMesh();
+	void ImportMaterial();
+	void ImportMaterialInstanceConstant();
+	FString LogContent = TEXT("");
 
 private:
 	// Export tools
@@ -29,20 +30,14 @@ private:
 			Texture2DInfo
 		};
 	};
-	FString ExportFolderFor(EExportType::Type Type);
 	FString RessourceTypeFor(EExportType::Type Type);
-	void ImportRessource(const FString &Ressource, EExportType::Type Type);
-	bool ExportPackage(const FString &Package, EExportType::Type Type, FString & ExportFolder);
-	void ExportPackageToRequirements(const FString &Package, EExportType::Type Type);
+	void ImportRessource(EExportType::Type Type);
+	void ExportPackageToRequirements(EExportType::Type Type);
 
 	/// Ressources requirements
 	void ResolveRequirements();
-	void ExportStaticMeshRequirements();
-	void ExportStaticMeshRequirements(const FString &StaticMeshesParams);
 	void ExportMaterialInstanceConstantAssets();
 	void ExportMaterialAssets();
-	void ExportTextureAssets();
-	void ExportStaticMeshAssets();
 	void PostEditChangeFor(const FString &Type);
 
 	/// Actor creation
@@ -51,7 +46,7 @@ private:
 	T * SpawnActor();
 
 	/// Actor Importation
-	void ImportLevel();
+	void ImportLevelInternal();
 	void ImportBrush();
 	void ImportPolyList(UPolys * Polys);
 	void ImportStaticMeshActor();

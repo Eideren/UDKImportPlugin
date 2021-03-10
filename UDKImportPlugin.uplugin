@@ -1,20 +1,24 @@
 {
-    "FileVersion" : 3,
-	
-	"FriendlyName" : "UDK Import Plugin",
-	"Version" : 1,
-	"VersionName" : "1.0",
-	"CreatedBy" : "Vincent (Speedy37) Rouille",
-	"CreatedByURL" : "http://speedy37.fr",
-	"EngineVersion" : 1579795,
-	"Description" : "Automatic importation of Map and related assets from UDK.",
-	"Category" : "Import",
-	
-    "Modules" :
-	[
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "UDK Import Plugin",
+	"Description": "Port UDK materials to UE4",
+	"Category": "Import",
+	"CreatedBy": "Initially from Vincent (Speedy37) Rouille, porting and changes by Eideren",
+	"CreatedByURL": "http://speedy37.fr",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
 		{
-			"Name" : "UDKImportPlugin",
-			"Type" : "Developer"
+			"Name": "UDKImportPlugin",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	]
 }

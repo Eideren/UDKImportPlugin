@@ -1,4 +1,5 @@
 #pragma once
+#include "UDKImportPluginPrivatePCH.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogUDKImportPlugin, Warning, All);
 
@@ -55,14 +56,11 @@ protected:
 	FText ExportType_GetSelectedText() const;
 
 protected:
-	/** Path to the UDK directory (ex: "C:/UDK/UDK-2014-02") */
-	TSharedPtr<SEditableTextBox> SUDKPath;
-
-	/** Name of the Map to export */
-	TSharedPtr<SEditableTextBox> SLevel;
+	/** Path to the temporary directory to use */
+	TSharedPtr<SEditableTextBox> SSourcePath;
 
 	/** Path to the temporary directory to use */
-	TSharedPtr<SEditableTextBox> STmpPath;
+	TSharedPtr<SEditableTextBox> SDestPath;
 
 	/** Path to the temporary directory to use */
 	TSharedPtr<SComboBox< TSharedPtr<EUDKImportMode::Type> > > ExportTypeComboBox;

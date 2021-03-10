@@ -1,16 +1,15 @@
+﻿#include "T3DParser.h"
 #include "UDKImportPluginPrivatePCH.h"
-#include "T3DParser.h"
-#include "Editor/UnrealEd/Public/Layers/ILayers.h"
 
 DEFINE_LOG_CATEGORY(UDKImportPluginLog);
 
 float T3DParser::UnrRotToDeg = 0.00549316540360483;
 float T3DParser::IntensityMultiplier = 5000;
 
-T3DParser::T3DParser(const FString &UdkPath, const FString &TmpPath)
+T3DParser::T3DParser(const FString &SourcePath, const FString &DestPath)
 {
-	this->UdkPath = UdkPath;
-	this->TmpPath = TmpPath;
+	this->SourcePath = SourcePath;
+	this->DestPath = DestPath;
 }
 
 inline bool IsWhitespace(TCHAR c) 
@@ -22,7 +21,7 @@ void T3DParser::ResetParser(const FString &Content)
 {
 	LineIndex = 0;
 	ParserLevel = 0;
-	Content.ParseIntoArray(&Lines, TEXT("\n"), true);
+	Content.ParseIntoArray(Lines, TEXT("\n"), true);
 }
 
 bool T3DParser::NextLine()
@@ -175,20 +174,35 @@ void T3DParser::AddRequirement(const FRequirement &Requirement, UObjectDelegate 
 	if (pObject != NULL)
 	{
 		Action.ExecuteIfBound(*pObject);
+		return;
+	}
+
+	FString ObjectPath = GetPathToUAsset(Requirement.RelDirectory, Requirement.Name);
+	UObject * asset = NULL;
+
+	if (Requirement.Type == TEXT("StaticMesh"))
+		asset = LoadObject<UStaticMesh>(NULL, *ObjectPath);
+	/*else if (Requirement.Type == TEXT("Material") || Requirement.Type == TEXT("DecalMaterial"))
+		asset = LoadObject<UMaterial>(NULL, *ObjectPath);*/
+	else if (Requirement.Type.StartsWith(TEXT("Texture")))
+		asset = LoadObject<UTexture>(NULL, *ObjectPath);
+
+	
+	TArray<UObjectDelegate> * pActions = Requirements.Find(Requirement);
+	if (pActions != NULL)
+	{
+		pActions->Add(Action);
 	}
 	else
 	{
-		TArray<UObjectDelegate> * pActions = Requirements.Find(Requirement);
-		if (pActions != NULL)
-		{
-			pActions->Add(Action);
-		}
-		else
-		{
-			TArray<UObjectDelegate> Actions;
-			Actions.Add(Action);
-			Requirements.Add(Requirement, Actions);
-		}
+		TArray<UObjectDelegate> Actions;
+		Actions.Add(Action);
+		Requirements.Add(Requirement, Actions);
+	}
+
+	if (asset)
+	{
+		FixRequirement(Requirement, asset);
 	}
 }
 
@@ -360,88 +374,52 @@ bool T3DParser::IsActorProperty(AActor * Actor)
 	FString Value;
 	if (GetProperty(TEXT("Layer="), Value))
 	{
-		GEditor->Layers->AddActorToLayer(Actor, FName(*Value));
+		Actor->Layers.Add(FName(*Value));
 		return true;
 	}
 
 	return false;
 }
 
-int32 T3DParser::RunUDK(const FString &CommandLine)
+void T3DParser::ParseRessourceUrl(const FString &Url, FString &relDirectory, FString &Name)
 {
-	FString Output;
-	return RunUDK(CommandLine, Output);
-}
+	int32 PackageIndex;
 
-int32 T3DParser::RunUDK(const FString &CommandLine, FString &Output)
-{
-	FString StdErr;
-	int32 exitCode;
-
-	if (FPlatformProcess::ExecProcess(*(UdkPath / TEXT("Binaries/Win32/UDK.com")), *CommandLine, &exitCode, &Output, &StdErr))
-	{
-		return exitCode;
-	}
-
-	return -1;
-}
-
-bool T3DParser::ConvertOBJToFBX(const FString &ObjFileName, const FString &FBXFilename)
-{
-	const FString CommandLine = FString::Printf(TEXT("\"%s\" \"%s\""), *ObjFileName, *FBXFilename);
-	const FString Program = TEXT("C:\\Program Files (x86)\\Autodesk\\FBX\\FBX Converter\\2013.3\\bin\\FbxConverter.exe");
-	FString StdOut, StdErr;
-	int32 exitCode;
-
-	if (FPlatformProcess::ExecProcess(*Program, *CommandLine, &exitCode, &StdOut, &StdErr))
-	{
-		return exitCode == 0;
-	}
-
-	return false;
-}
-
-void T3DParser::ParseRessourceUrl(const FString &Url, FString &Package, FString &Name)
-{
-	int32 PackageIndex, NameIndex;
-
-	PackageIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromStart);
+	PackageIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromEnd);
 
 	if (PackageIndex == -1)
 	{
-		Package = Url;
-		Name = FString();
+		relDirectory = this->RelDirectory;
+		Name = Url;
 	}
 	else
 	{
-		Package = Url.Mid(0, PackageIndex);
-		NameIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		Name = Url.Mid(NameIndex + 1);
+		relDirectory = Url.Mid(0, PackageIndex);
+		Name = Url.Mid(PackageIndex + 1);
 	}
 }
 
-bool T3DParser::ParseRessourceUrl(const FString &Url, FString &Type, FString &Package, FString &Name)
+bool T3DParser::ParseRessourceUrl(const FString &Url, FString &Type, FString &relDirectory, FString &Name)
 {
-	int32 Index, PackageIndex, NameIndex;
+	int32 Index, PackageIndex;
 
 	if (!Url.FindChar('\'', Index) || !Url.EndsWith(TEXT("'")))
 		return false;
 
 	Type = Url.Mid(0, Index);
 	++Index;
-	PackageIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromStart, Index);
+	PackageIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromEnd);
 
 	if (PackageIndex == -1)
 	{
 		// Package Name is the current Package
-		Package = this->Package;
+		relDirectory = this->RelDirectory;
 		Name = Url.Mid(Index, Url.Len() - Index - 1);
 	}
 	else
 	{
-		Package = Url.Mid(Index, PackageIndex - Index);
-		NameIndex = Url.Find(".", ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		Name = Url.Mid(NameIndex + 1, Url.Len() - NameIndex - 2);
+		relDirectory = Url.Mid(Index, PackageIndex - Index);
+		Name = Url.Mid(PackageIndex + 1, Url.Len() - PackageIndex - 2);
 	}
 
 	return true;

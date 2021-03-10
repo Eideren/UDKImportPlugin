@@ -11,4 +11,4 @@
 #include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionConstant.h"
 
-#include "IUDKImportPlugin.h"
+#include "UDKImportPlugin.h"

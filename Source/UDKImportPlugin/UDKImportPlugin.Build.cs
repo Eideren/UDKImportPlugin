@@ -1,32 +1,59 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
 using UnrealBuildTool;
-using System.IO;
- 
-namespace UnrealBuildTool.Rules
+
+public class UDKImportPlugin : ModuleRules
 {
-	public class UDKImportPlugin : ModuleRules
+	public UDKImportPlugin(ReadOnlyTargetRules Target) : base(Target)
 	{
-        public UDKImportPlugin(TargetInfo Target)
-		{
-			PublicDependencyModuleNames.AddRange(
-				new string[] {
-					"Core",
-					"Engine",
-					"UnrealEd",
-					"CoreUObject",		// @todo Mac: for some reason CoreUObject and Engine are needed to link in debug on Mac
-                    "InputCore",
-					"SlateCore",
-					"Slate"
-				}
+		MinFilesUsingPrecompiledHeaderOverride = 1;
+		bUseUnity = true;
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		//PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
+		
+		PublicIncludePaths.AddRange(
+			new string[] {
+				// ... add public include paths required here ...
+			}
+			);
+				
+		
+		PrivateIncludePaths.AddRange(
+			new string[] {
+				// ... add other private include paths required here ...
+			}
 			);
 			
-			PrivateDependencyModuleNames.AddRange(
-				new string[] {
-					"EditorStyle",
-					"Projects",
-					"LevelEditor",
-					"AssetTools",
-				}
+		
+		PublicDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"Core",
+				// ... add other public dependencies that you statically link with here ...
+			}
 			);
-		}
+			
+		
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"CoreUObject",
+				"Engine",
+				"Slate",
+				"SlateCore",
+				"InputCore",
+				"UnrealEd",
+				"LevelEditor",
+				// ... add private dependencies that you statically link with here ...	
+			}
+			);
+		
+		
+		DynamicallyLoadedModuleNames.AddRange(
+			new string[]
+			{
+				// ... add any modules that your module loads dynamically here ...
+			}
+			);
 	}
 }

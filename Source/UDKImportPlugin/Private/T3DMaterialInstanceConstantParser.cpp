@@ -1,28 +1,28 @@
+﻿#include "T3DMaterialInstanceConstantParser.h"
 #include "UDKImportPluginPrivatePCH.h"
-#include "T3DMaterialInstanceConstantParser.h"
 #include "T3DLevelParser.h"
 
-T3DMaterialInstanceConstantParser::T3DMaterialInstanceConstantParser(T3DLevelParser * ParentParser, const FString &Package) : T3DParser(ParentParser->UdkPath, ParentParser->TmpPath)
+T3DMaterialInstanceConstantParser::T3DMaterialInstanceConstantParser(T3DLevelParser * ParentParser, const FString &RelDirectory) : T3DParser(ParentParser->SourcePath, ParentParser->DestPath)
 {
 	this->LevelParser = ParentParser;
-	this->Package = Package;
+	this->RelDirectory = RelDirectory;
 	this->MaterialInstanceConstant = NULL;
 }
 
-UMaterialInstanceConstant* T3DMaterialInstanceConstantParser::ImportT3DFile(const FString &FileName)
+UMaterialInstanceConstant* T3DMaterialInstanceConstantParser::ImportT3DFile(const FString &FileName, const FRequirement &req)
 {
 	FString MaterialT3D;
 	if (FFileHelper::LoadFileToString(MaterialT3D, *FileName))
 	{
 		ResetParser(MaterialT3D);
 		MaterialT3D.Empty();
-		return ImportMaterialInstanceConstant();
+		return ImportMaterialInstanceConstant(req);
 	}
 
 	return NULL;
 }
 
-UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialInstanceConstant()
+UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialInstanceConstant(const FRequirement &req)
 {
 	FString ClassName, Name, Value;
 	int32 ParameterIndex;
@@ -32,10 +32,21 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 	ensure(ClassName == TEXT("MaterialInstanceConstant"));
 	ensure(GetOneValueAfter(TEXT(" Name="), Name));
 
-	FString BasePackageName = FString::Printf(TEXT("/Game/UDK/%s/MaterialInstances"), *Package);
 	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
-	UMaterialInstanceConstantFactoryNew* MaterialFactory = ConstructObject<UMaterialInstanceConstantFactoryNew>(UMaterialInstanceConstantFactoryNew::StaticClass());
-	MaterialInstanceConstant = (UMaterialInstanceConstant*)AssetToolsModule.Get().CreateAsset(Name, BasePackageName, UMaterialInstanceConstant::StaticClass(), MaterialFactory);
+	UMaterialInstanceConstantFactoryNew* MaterialFactory = NewObject<UMaterialInstanceConstantFactoryNew>(UMaterialInstanceConstantFactoryNew::StaticClass());
+	FString ObjectPath = GetPathToUAsset(*req.RelDirectory, *req.Name);
+	MaterialInstanceConstant = LoadObject<UMaterialInstanceConstant>(NULL, *ObjectPath, NULL, LOAD_NoWarn | LOAD_Quiet);
+	if (MaterialInstanceConstant == NULL)
+	{
+		MaterialInstanceConstant = (UMaterialInstanceConstant*)AssetToolsModule.Get().CreateAsset(Name, GetPathToDirectory(req.RelDirectory), UMaterialInstanceConstant::StaticClass(), MaterialFactory);
+	}
+	else
+	{
+		MaterialInstanceConstant->TextureParameterValues.Empty();
+		MaterialInstanceConstant->ScalarParameterValues.Empty();
+		MaterialInstanceConstant->VectorParameterValues.Empty();
+		MaterialInstanceConstant->VectorParameterValues.Empty();
+	}
 	if (MaterialInstanceConstant == NULL)
 	{
 		return NULL;
@@ -55,6 +66,12 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 				MaterialInstanceConstant->TextureParameterValues.SetNum(ParameterIndex + 1);
 
 			FTextureParameterValue &Parameter = MaterialInstanceConstant->TextureParameterValues[ParameterIndex];
+			if (GetOneValueAfter(TEXT("ParameterName="), Value))
+			{
+				Value.RemoveFromStart("\"");
+				Value.RemoveFromEnd("\"");
+				Parameter.ParameterInfo.Name = *Value;
+			}
 			if (GetOneValueAfter(TEXT("ParameterValue="), Value))
 			{
 				FRequirement Requirement;
@@ -67,9 +84,7 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 					UE_LOG(UDKImportPluginLog, Warning, TEXT("Unable to parse ressource url : %s"), *Value);
 				}
 			}
-			if (GetOneValueAfter(TEXT("ParameterName="), Value))
-				Parameter.ParameterName = *Value;
-				
+			SetSwitchParameter(MaterialInstanceConstant, Parameter.ParameterInfo, true, true);
 		}
 		else if (IsParameter(TEXT("ScalarParameterValues"), ParameterIndex, Value))
 		{
@@ -77,10 +92,14 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 				MaterialInstanceConstant->ScalarParameterValues.SetNum(ParameterIndex + 1);
 
 			FScalarParameterValue &Parameter = MaterialInstanceConstant->ScalarParameterValues[ParameterIndex];
+			if (GetOneValueAfter(TEXT("ParameterName="), Value))
+			{
+				Value.RemoveFromStart("\"");
+				Value.RemoveFromEnd("\"");
+				Parameter.ParameterInfo.Name = *Value;
+			}
 			if (GetOneValueAfter(TEXT("ParameterValue="), Value))
 				Parameter.ParameterValue = FCString::Atoi(*Value);
-			if (GetOneValueAfter(TEXT("ParameterName="), Value))
-				Parameter.ParameterName = *Value;
 		}
 		else if (IsParameter(TEXT("VectorParameterValues"), ParameterIndex, Value))
 		{
@@ -88,10 +107,14 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 				MaterialInstanceConstant->VectorParameterValues.SetNum(ParameterIndex + 1);
 
 			FVectorParameterValue &Parameter = MaterialInstanceConstant->VectorParameterValues[ParameterIndex];
+			if (GetOneValueAfter(TEXT("ParameterName="), Value))
+			{
+				Value.RemoveFromStart("\"");
+				Value.RemoveFromEnd("\"");
+				Parameter.ParameterInfo.Name = *Value;
+			}
 			if (GetOneValueAfter(TEXT("ParameterValue="), Value))
 				Parameter.ParameterValue.InitFromString(Value);
-			if (GetOneValueAfter(TEXT("ParameterName="), Value))
-				Parameter.ParameterName = *Value;
 		}
 		else if (GetProperty(TEXT("Parent="), Value))
 		{
@@ -105,7 +128,43 @@ UMaterialInstanceConstant*  T3DMaterialInstanceConstantParser::ImportMaterialIns
 				UE_LOG(UDKImportPluginLog, Warning, TEXT("Unable to parse ressource url : %s"), *Value);
 			}
 		}
+		else
+		{
+			// Could be important
+			UE_LOG(UDKImportPluginLog, Warning, TEXT("Unimplemented handling for %s"), *Line);
+		}
 	}
+
+	/*
+	for (int32 CheckIdx = 0; CheckIdx < MaterialInstanceConstant->TextureParameterValues.Num(); CheckIdx++)
+	{
+		auto param = &MaterialInstanceConstant->TextureParameterValues[CheckIdx];
+		param->ExpressionGUID = GetGuid(MaterialInstanceConstant, param->ParameterInfo.Name);
+	}
+	for (int32 CheckIdx = 0; CheckIdx < MaterialInstanceConstant->VectorParameterValues.Num(); CheckIdx++)
+	{
+		auto param = &MaterialInstanceConstant->VectorParameterValues[CheckIdx];
+		param->ExpressionGUID = GetGuid(MaterialInstanceConstant, param->ParameterInfo.Name);
+	}
+	for (int32 CheckIdx = 0; CheckIdx < MaterialInstanceConstant->ScalarParameterValues.Num(); CheckIdx++)
+	{
+		auto param = &MaterialInstanceConstant->ScalarParameterValues[CheckIdx];
+		param->ExpressionGUID = GetGuid(MaterialInstanceConstant, param->ParameterInfo.Name);
+	}*/
+
+	// Enable all statics as I don't know how to query for these
+	/*FStaticParameterSet CompositedStaticParameters;
+	MaterialInstanceConstant->GetStaticParameterValues(CompositedStaticParameters);
+	for (int32 CheckIdx = 0; CheckIdx < CompositedStaticParameters.StaticSwitchParameters.Num(); CheckIdx++)
+	{
+		FStaticSwitchParameter& SwitchParam = CompositedStaticParameters.StaticSwitchParameters[CheckIdx];
+		SwitchParam.bOverride = true;
+		SwitchParam.Value = true;
+	}
+
+	MaterialInstanceConstant->UpdateStaticPermutation(CompositedStaticParameters);
+	*/
+	MaterialInstanceConstant->Modify(); // Might force save changes to materials
 
 	return MaterialInstanceConstant;
 }
